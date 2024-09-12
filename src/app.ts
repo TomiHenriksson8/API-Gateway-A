@@ -1,30 +1,58 @@
-import dotenv from 'dotenv';
-dotenv.config();
-import express, {Request, Response} from 'express';
-import morgan from 'morgan';
-import helmet from 'helmet';
+import 'dotenv/config';
+import express from 'express';
 import cors from 'cors';
-
-import {notFound, errorHandler} from './middlewares';
-import api from './api';
-import {MessageResponse} from './types/Messages';
+import helmet from 'helmet';
+import morgan from 'morgan';
+import { createProxyMiddleware } from 'http-proxy-middleware';
+import { ClientRequest } from 'http';
 
 const app = express();
 
-app.use(morgan('dev'));
-app.use(helmet());
-app.use(cors());
-app.use(express.json());
 
-app.get<{}, MessageResponse>('/', (_req: Request, res: Response) => {
-  res.json({
-    message: 'API location: api/v1',
-  });
+app.use(cors());
+app.use(helmet());
+app.use(morgan('combined'));
+app.disable('x-powered-by');
+
+
+const services = [
+  {
+    route: '/api1',
+    target: 'https://pokeapi.co/api/v2/pokemon',
+  },
+  {
+    route: '/api2',
+    target: 'https://jsonplaceholder.typicode.com/todos',
+  },
+  {
+    route: '/weather',
+    target: 'https://api.openweathermap.org/data/2.5/weather',
+    on: {
+      proxyReq: (proxyReq: ClientRequest) => {
+        // Append the OpenWeatherMap API key to every request
+        proxyReq.path += `&appid=${process.env.OPENWEATHER_API_KEY}`;
+      },
+    },
+  },
+];
+
+services.forEach(({ route, target, on }) => {
+  const proxyOptions = {
+    on,
+    target,
+    changeOrigin: true,
+    pathRewrite: {
+      [`^${route}`]: '',
+    },
+    secure: process.env.NODE_ENV === 'production',
+  };
+
+  console.log(`Setting up proxy for ${route} -> ${target}`);
+  app.use(route, createProxyMiddleware(proxyOptions));
 });
 
-app.use('/api/v1', api);
+const PORT = process.env.PORT || 3008;
 
-app.use(notFound);
-app.use(errorHandler);
-
-export default app;
+app.listen(PORT, () => {
+  console.log(`API Gateway is running on port ${PORT}`);
+});
